@@ -1,0 +1,92 @@
+module mojo_top (
+    input clk,              // 50MHz clock
+    input rst_n,            // reset button (active low)
+    output led [8],         // 8 user controllable LEDs
+    input cclk,             // configuration clock, AVR ready when high
+    output spi_miso,        // AVR SPI MISO
+    input spi_ss,           // AVR SPI Slave Select
+    input spi_mosi,         // AVR SPI MOSI
+    input spi_sck,          // AVR SPI Clock
+    output spi_channel [4], // AVR general purpose pins (used by default to select ADC channel)
+    input avr_tx,           // AVR TX (FPGA RX)
+    output avr_rx,          // AVR RX (FPGA TX)
+    input avr_rx_busy,      // AVR RX buffer full
+    output src[3],          // 3 bit output to full adder. Most significant bit is Cin, least significant is A
+    input sum,              // Sum from the full adder
+    input carry,            // Cout from the full adder 
+    input center,           // Center button on IO Shield. Used to toggle between states
+    output io_led[8]        // LEDs 0 - 7 on the IO Shield. LED 7,6,5 = Cin,B,A. LED 3,2 = Sum,Cout. LED 0 = error indication (solid = pass, blinking = fail)
+  ) {
+  
+  sig rst;                    // reset signal
+  sig error;                  // error signal. If 1, the full adder test case fails
+  sig correct_outputs[8][2];  // array of hardcoded correct ouputs for the full adder to check against actual outputs
+  sig out[2];                 // store reading from the full adder as a 2 bit signal. Most significant bit is Cout, least significant bit is Sum
+  var currentInput;           // store the current testcase being given to the full adder. 
+  
+  .clk(clk) {
+    // The reset conditioner is used to synchronize the reset signal to the FPGA
+    // clock. This ensures the entire FPGA comes out of reset at the same time.
+    reset_conditioner reset_cond;
+    .rst(rst){
+    
+      fsm state = {MANUAL, AUTO, ERROR}; // initialise FSM with 3 states, and link the fsm clock and reset to clk and rst signals
+    }
+  }
+  
+  counter myCounter(#WIDTH(27),#OUTWIDTH(3),.clk(clk),.rst(center||rst)); // counter to count up from 000 to 111. Will be linked to src output in AUTO state to run through adder test cases
+  counter errorBlinker(#WIDTH(23),#OUTWIDTH(1),.clk(clk),.rst(center||rst)); // dual purpose clock. First is to blink the error LED, second is to delay checking of error to wait for valid output from the full adder
+  
+  always {
+    reset_cond.in = ~rst_n; // input raw inverted reset signal
+    rst = reset_cond.out;   // conditioned reset
+    
+    correct_outputs = {b11,b10,b10,b01,b10,b01,b01,b00}; // initialise hardcoded array of ideal adder outputs to be checked against
+    out = c{carry,sum}; // concatenate carry and sum from the adder into a single 2 bit signal. This is what is checked against the correct_outputs array above
+    src = b0; // initialise src
+    led = b0; // initialise led
+    io_led = b0;
+    
+    case (state.q){
+      state.MANUAL: // Manual testing state. Users can use the switches on the stripboard to manually set A, B and Cin
+        src = b000; // Set src to 000 so as not to interfere with the manual testing
+        currentInput = b000;
+        led = b11111111; // in manual mode all LEDs are lit
+        io_led = b11111111;
+        
+        if(center){ // Change to AUTO state when center button is pressed
+          state.d = state.AUTO;
+        }
+      state.AUTO: // Auto testing mode. FPGA will output 000 (Cin,B,A) to 111
+        error = out != correct_outputs[currentInput]; // if output from adder is not equal to the corresponding ideal result, error signal is 1
+        src = myCounter.out; // set src to be equal to the 3bit counter output. This will loop through 000 to 111 as outputs from the FPGA
+        currentInput = c{myCounter.out}; // set currentInput variable to store the current test case        
+        led = c{currentInput,0,out,0,!error};
+        io_led = c{currentInput,0,out,0,!error};
+        
+        if(errorBlinker.out && error){ // If there is an error still by the time errorBlinker is 1, then an error is detected and change to state ERROR
+          state.d = state.ERROR;
+        }      
+
+        
+        if(center){ // If button is pressed, go back to state MANUAL
+          state.d = state.MANUAL;
+        }
+  
+      state.ERROR: // Error state. Failing testcase is frozen to allow for debugging
+        error = errorBlinker.out; // blink the led    
+        led = c{currentInput,0,out,0,error};
+        io_led = c{currentInput,0,out,0,error};
+        src = currentInput; // set the src as the failing testcase to persist the output from the FPGA
+        
+        if(center){ // If button is pressed, go back to state MANUAL
+          state.d = state.MANUAL;
+        }
+    }
+    
+    spi_miso = bz;          // not using SPI
+    spi_channel = bzzzz;    // not using flags
+    avr_rx = bz;            // not using serial port
+  }
+}
+

@@ -1,0 +1,13 @@
+module blinker #(WIDTH=25:WIDTH>0)(
+    input clk,  // clock
+    input rst,  // reset
+    output out
+  ) {
+  
+  dff flipflop[WIDTH](.clk(clk),.rst(rst));
+
+  always {
+    out = flipflop.q[WIDTH-1];
+    flipflop.d = flipflop.q+1;
+  }
+}

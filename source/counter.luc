@@ -1,0 +1,17 @@
+// This module initialises a counter that counts in binary up to the number specified by your OUTWIDTH
+// e.g. if OUTWIDTH = 3, counter output will count from 000 to 111 before resetting to 000.
+// WIDTH specifies how many bits to count up before your output increases by 1. Basically specifies the delay between counts (WIDTH = 25 ~ 0.33 sec delay)
+
+module counter #(WIDTH=27:WIDTH>0,OUTWIDTH=3:OUTWIDTH>0&&OUTWIDTH<WIDTH)(
+    input clk,  // clock
+    input rst,  // reset
+    output out[OUTWIDTH]
+  ) {
+  
+  dff flipflop[WIDTH+OUTWIDTH-1](.clk(clk),.rst(rst));
+
+  always {
+    out = flipflop.q[WIDTH+OUTWIDTH-2:WIDTH-1]; // Set the output as the 3 most significant bits of the d-flipflop. This is the counter
+    flipflop.d = flipflop.q+1; // Add one to the input at every clock cycle
+  }
+}
